@@ -1,0 +1,719 @@
+pipeline:
+  name: azure-test
+  identifier: azuredemo
+  projectIdentifier: ServiceNowCloudDiscovery
+  orgIdentifier: snow
+  tags: {}
+  stages:
+    - stage:
+        name: Prereq Secrets
+        identifier: PrereqSecrets
+        description: This stage will fetches all initial required secrets
+        type: Custom
+        spec:
+          execution:
+            steps:
+              - step:
+                  name: get-github-ssh
+                  identifier: getgithubssh
+                  template:
+                    templateRef: secrettemplateazurekmaasnbssnowdev
+                    versionLabel: v0.0.1
+                    templateInputs:
+                      type: ShellScript
+                      spec:
+                        environmentVariables:
+                          - name: namespace
+                            type: String
+                            value: <+pipeline.variables.namespace>
+                          - name: role
+                            type: String
+                            value: <+pipeline.variables.role>
+                          - name: field
+                            type: String
+                            value: github-ssh-private-key
+                          - name: secrets_path
+                            type: String
+                            value: secrets/artifactory
+              - step:
+                  name: get-github_pat
+                  identifier: getgithubpat
+                  template:
+                    templateRef: secrettemplateazurekmaasnbssnowdev
+                    versionLabel: v0.0.1
+                    templateInputs:
+                      type: ShellScript
+                      spec:
+                        environmentVariables:
+                          - name: namespace
+                            type: String
+                            value: <+pipeline.variables.namespace>
+                          - name: role
+                            type: String
+                            value: <+pipeline.variables.role>
+                          - name: field
+                            type: String
+                            value: github-pat
+                          - name: secrets_path
+                            type: String
+                            value: secrets/artifactory
+              - step:
+                  name: get-arm-client-id
+                  identifier: getarmclientid
+                  template:
+                    templateRef: secrettemplateazurekmaasnbssnowdev
+                    versionLabel: v0.0.1
+                    templateInputs:
+                      type: ShellScript
+                      spec:
+                        environmentVariables:
+                          - name: namespace
+                            type: String
+                            value: <+pipeline.variables.namespace>
+                          - name: role
+                            type: String
+                            value: <+pipeline.variables.role>
+                          - name: field
+                            type: String
+                            value: paymentscore-dev-client-id
+                          - name: secrets_path
+                            type: String
+                            value: secrets/artifactory
+              - step:
+                  name: get-arm-client-secret
+                  identifier: getarmclientsecret
+                  template:
+                    templateRef: secrettemplateazurekmaasnbssnowdev
+                    versionLabel: v0.0.1
+                    templateInputs:
+                      type: ShellScript
+                      spec:
+                        environmentVariables:
+                          - name: namespace
+                            type: String
+                            value: <+pipeline.variables.namespace>
+                          - name: role
+                            type: String
+                            value: <+pipeline.variables.role>
+                          - name: field
+                            type: String
+                            value: paymentscore-dev-client-secret
+                          - name: secrets_path
+                            type: String
+                            value: secrets/artifactory
+              - step:
+                  name: get-arm-subscription-id
+                  identifier: getarmsubscription_id
+                  template:
+                    templateRef: secrettemplateazurekmaasnbssnowdev
+                    versionLabel: v0.0.1
+                    templateInputs:
+                      type: ShellScript
+                      spec:
+                        environmentVariables:
+                          - name: namespace
+                            type: String
+                            value: <+pipeline.variables.namespace>
+                          - name: role
+                            type: String
+                            value: <+pipeline.variables.role>
+                          - name: field
+                            type: String
+                            value: paymentscore-dev-subscription-id
+                          - name: secrets_path
+                            type: String
+                            value: secrets/artifactory
+              - step:
+                  name: get-arm-tenant-id
+                  identifier: getarmtenant_id
+                  template:
+                    templateRef: secrettemplateazurekmaasnbssnowdev
+                    versionLabel: v0.0.1
+                    templateInputs:
+                      type: ShellScript
+                      spec:
+                        environmentVariables:
+                          - name: namespace
+                            type: String
+                            value: <+pipeline.variables.namespace>
+                          - name: role
+                            type: String
+                            value: <+pipeline.variables.role>
+                          - name: field
+                            type: String
+                            value: paymentscore-dev-tenant-id
+                          - name: secrets_path
+                            type: String
+                            value: secrets/artifactory
+        tags: {}
+    - stage:
+        name: Preflight
+        identifier: Preflight
+        description: ""
+        type: Custom
+        spec:
+          execution:
+            steps:
+              - step:
+                  type: ShellScript
+                  name: Pipeline Details
+                  identifier: Pipeline_Details
+                  spec:
+                    shell: Bash
+                    onDelegate: true
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          type=<+pipeline.triggerType>
+                          echo "Trigger -" $type
+
+                          # Set the repo_name and branch variables based on the trigger type
+                          case $type in
+                              WEBHOOK)
+                                  # Github webhook - set the values from the payload
+                                  repo_name=<+trigger.payload.repository.name>
+                                  branch=<+trigger.branch>
+                                  ;;
+                              WEBHOOK_CUSTOM)
+                                  # Custom webhook (CBJ) - github_repo and branch must be in the payload in the Jenkinsfile
+                                  repo_name=<+trigger.payload.github_repo>
+                                  branch=<+trigger.payload.branch>
+                                  ;;
+                              MANUAL)
+                                  # Manual trigger on the Harness UI
+                                  # If commitaSha from Github is trigger is empty, then set values from custom webhook
+                                  if [[ <+trigger.commitSha> == null ]]; then
+                                      repo_name=<+trigger.payload.github_repo>
+                                      branch=<+trigger.payload.branch>
+                                  else
+                                      repo_name=<+trigger.payload.repository.name>
+                                      branch=<+trigger.branch>
+                                  fi
+                                  ;;
+                              *)
+                          esac
+                    environmentVariables: []
+                    outputVariables:
+                      - name: repo_name
+                        type: String
+                        value: repo_name
+                      - name: branch
+                        type: String
+                        value: branch
+                  timeout: 10m
+              - step:
+                  type: ShellScript
+                  name: Github Repo
+                  identifier: Github_Repo
+                  spec:
+                    shell: Bash
+                    onDelegate: true
+                    source:
+                      type: Inline
+                      spec:
+                        script: echo "Please enter the github repo name and branch containing the terraform module"
+                    environmentVariables:
+                      - name: github_repo
+                        type: String
+                        value: <+input>.executionInput()
+                      - name: branch
+                        type: String
+                        value: <+input>.executionInput()
+                    outputVariables: []
+                  timeout: 10m
+                  when:
+                    stageStatus: Success
+                    condition: <+pipeline.stages.Preflight.spec.execution.steps.Pipeline_Details.output.outputVariables.repo_name> == "null"
+        tags: {}
+    - stage:
+        name: Options
+        identifier: Options
+        description: ""
+        type: Custom
+        spec:
+          execution:
+            steps:
+              - step:
+                  type: ShellScript
+                  name: Annotate
+                  identifier: Annotate
+                  spec:
+                    shell: Bash
+                    onDelegate: true
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          subscription_name=<+pipeline.variables.subscription_name>
+                          env=${subscription_name##*-}
+
+                          repo=<+pipeline.stages.Preflight.spec.execution.steps.Pipeline_Details.output.outputVariables.repo_name>
+                          branch=<+pipeline.stages.Preflight.spec.execution.steps.Pipeline_Details.output.outputVariables.branch>
+
+                          if [[ $repo == "null" ]]; then
+                            repo=<+pipeline.stages.Preflight.spec.execution.steps.Github_Repo.spec.environmentVariables.github_repo>
+                            branch=<+pipeline.stages.Preflight.spec.execution.steps.Github_Repo.spec.environmentVariables.branch>
+                          fi
+
+                          echo "Account - <+pipeline.variables.subscription_name>
+                          Repo - $repo
+                          Branch - $branch
+                          Environment - ${env##*-}
+                          Action - Terraform $tf_action
+                          TF Scans (Lint & TFSec) - $tf_scan"
+                    environmentVariables:
+                      - name: tf_action
+                        type: String
+                        value: <+input>.executionInput().allowedValues(Plan,Apply,Destroy)
+                      - name: tf_scan
+                        type: String
+                        value: <+input>.executionInput().allowedValues(true,false)
+                    outputVariables:
+                      - name: repo_name
+                        type: String
+                        value: repo
+                      - name: branch
+                        type: String
+                        value: branch
+                  timeout: 10m
+        tags: {}
+        when:
+          pipelineStatus: Success
+    - stage:
+        name: Add SSH Key Bespoke
+        identifier: Add_SSH_Key_Bespoke
+        description: ""
+        type: Custom
+        spec:
+          execution:
+            steps:
+              - step:
+                  type: ShellScript
+                  name: Annotate
+                  identifier: Annotate
+                  spec:
+                    shell: Bash
+                    executionTarget: {}
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          set -euo pipefail
+
+                          if [[ $ssh_key == null || -z $ssh_key ]]; then
+                            echo "Unable to add SSH Key"
+                            exit 1
+                          fi
+
+                          cd /home/harness
+                          mkdir -p .ssh
+                          echo "---Adding SSH Key Bespoke---"
+                          cat << EOF > .ssh/id_rsa
+                          $ssh_key
+                          EOF
+                          chmod 600 .ssh/id_rsa
+                          ssh-keyscan github.com &> .ssh/known_hosts
+                          ls .ssh
+                          echo "---SSH Key Added Bespoke---"
+                    environmentVariables:
+                      - name: ssh_key
+                        type: String
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getgithubssh.output.outputVariables.secret>
+                    outputVariables: []
+                  timeout: 10m
+        tags: {}
+        when:
+          pipelineStatus: Success
+          condition: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getgithubssh.output.outputVariables.secret> != null
+    - stage:
+        name: Terraform Scans
+        identifier: Terraform_Scans
+        description: ""
+        type: Custom
+        spec:
+          execution:
+            steps:
+              - step:
+                  type: ShellScript
+                  name: TF Lint
+                  identifier: TF_Lint
+                  spec:
+                    shell: Bash
+                    executionTarget: {}
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          echo $PWD
+                          git clone git@github.com:nationwide-building-society/<+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>.git --branch <+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.branch> --single-branch
+                          tf_fmt_output=$(terraform fmt -check -recursive "<+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>/<+pipeline.variables.module_path>")
+                          tf_fmt_exit_code=$?
+                          if [ $tf_fmt_exit_code -ne 0 ]; then
+                            echo "Lint failure: $tf_fmt_output"
+                          fi
+                          rm -rf <+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>
+                          exit $tf_fmt_exit_code
+                    environmentVariables: []
+                    outputVariables: []
+                  timeout: 10m
+              - step:
+                  type: ShellScript
+                  name: TFSec
+                  identifier: TFSec
+                  spec:
+                    shell: Bash
+                    executionTarget: {}
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          git clone git@github.com:nationwide-building-society/<+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>.git --branch <+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.branch> --single-branch
+
+                          tfsec <+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>/<+pipeline.variables.module_path>
+                          tfsec_exit_code=$?
+
+                          rm -rf <+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>
+                          exit $tfsec_exit_code
+                    environmentVariables: []
+                    outputVariables: []
+                  timeout: 10m
+        tags: {}
+        when:
+          pipelineStatus: Success
+          condition: <+pipeline.stages.Options.spec.execution.steps.Annotate.spec.environmentVariables.tf_scan> == "true"
+    - stage:
+        name: Terraform Plan and Apply
+        identifier: Terraform_Plan_and_Apply
+        description: ""
+        type: Custom
+        spec:
+          execution:
+            steps:
+              - step:
+                  type: ShellScript
+                  name: Terraform Plan
+                  identifier: Terraform_Plan_Bespoke
+                  spec:
+                    shell: Bash
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          if [ -d "<+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>" ]; then
+                            rm -rf <+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>
+                          fi
+                          export VAULT_ADDR=https://kmaas.ss-security-ccoe-np.azure.nbscloud.co.uk
+                          export VAULT_NAMESPACE=$namespace
+                          echo "Vault Namespace is $namespace and Role is $role"
+                          VAULT_TOKEN=$(vault write -field=token auth/azure/login role=$role \
+                          jwt="$(curl -s "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F" -H Metadata:true | jq -r '.access_token')" \
+                          subscription_id=$(curl -s -H Metadata:true "http://169.254.169.254/metadata/instance?api-version=2017-08-01" | jq -r '.compute | .subscriptionId') \
+                          resource_group_name=$(curl -s -H Metadata:true "http://169.254.169.254/metadata/instance?api-version=2017-08-01" | jq -r '.compute | .resourceGroupName') \
+                          vmss_name=$(curl -s -H Metadata:true "http://169.254.169.254/metadata/instance?api-version=2017-08-01" | jq -r '.compute | .name' | awk -F_ '{print$1}'))
+
+                          export VAULT_TOKEN
+                          git clone git@github.com:nationwide-building-society/<+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>.git --branch <+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.branch> --single-branch
+
+                          REPO_NAME=<+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>
+                          MODULE_PATH=<+pipeline.variables.module_path>
+                          TF_VARS_PATH=<+pipeline.variables.tf_vars_path>
+                          FULL_DIR_PATH=$(pwd)/<+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>
+
+                          terraform -chdir=$REPO_NAME/$MODULE_PATH init -upgrade -backend=true -backend-config="key=confluent.tfstate" -backend-config="storage_account_name=stdevuks01341746aeddtf" -backend-config="container_name=tfstate" -backend-config="subscription_id=d16db430-7f22-44c5-aaed-01341746aedd" -backend-config="resource_group_name=rg-dev-uks-46aedd-statefile" -reconfigure 
+
+                          terraform -chdir=$REPO_NAME/$MODULE_PATH plan -input=false -lock-timeout=180m -var-file=$FULL_DIR_PATH/<+pipeline.variables.tf_vars_path>/terraform.tfvars -out /tmp/tfplan
+                    environmentVariables:
+                      - name: ARM_SUBSCRIPTION_ID
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmsubscription_id.output.outputVariables.secret>
+                        type: String
+                      - name: ARM_TENANT_ID
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmtenant_id.output.outputVariables.secret>
+                        type: String
+                      - name: ARM_CLIENT_ID
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmclientid.output.outputVariables.secret>
+                        type: String
+                      - name: ARM_CLIENT_SECRET
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmclientsecret.output.outputVariables.secret>
+                        type: String
+                      - name: CONFLUENT_CLOUD_API_KEY
+                        type: String
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.confluentapikey.output.outputVariables.secret>
+                      - name: CONFLUENT_CLOUD_API_SECRET
+                        type: String
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.confluentapisecret.output.outputVariables.secret>
+                      - name: role
+                        type: String
+                        value: <+pipeline.variables.role>
+                      - name: namespace
+                        type: String
+                        value: <+pipeline.variables.namespace>
+                    outputVariables: []
+                    timeout: 10m
+                    executionTarget: {}
+                  when:
+                    stageStatus: Success
+                  timeout: 10m
+              - step:
+                  type: HarnessApproval
+                  name: Approval
+                  identifier: Approval
+                  spec:
+                    approvalMessage: Please review the following information and approve the pipeline progression
+                    includePipelineExecutionHistory: true
+                    approvers:
+                      userGroups: <+input>
+                      minimumCount: 1
+                      disallowPipelineExecutor: false
+                    approverInputs: []
+                    isAutoRejectEnabled: false
+                  timeout: 1d
+                  when:
+                    stageStatus: Success
+                    condition: <+pipeline.stages.Options.spec.execution.steps.Annotate.spec.environmentVariables.tf_action.toLowerCase()> == "apply" && <+ <+ <+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.branch> == "main" || <+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.branch> == "master" > || <+pipeline.variables.subscription_name.contains("dev")> || <+pipeline.variables.subscription_name.contains("test")> >
+                  failureStrategies:
+                    - onFailure:
+                        errors:
+                          - ApprovalRejection
+                        action:
+                          type: MarkAsFailure
+              - step:
+                  type: ShellScript
+                  name: Terraform Apply
+                  identifier: Terraform_Apply_Bespoke
+                  spec:
+                    shell: Bash
+                    source:
+                      type: Inline
+                      spec:
+                        script: |
+                          export VAULT_ADDR=https://kmaas.ss-security-ccoe-np.azure.nbscloud.co.uk
+                          export VAULT_NAMESPACE=$namespace
+                          echo "Vault Namespace is $namespace and Role is $role"
+                          VAULT_TOKEN=$(vault write -field=token auth/azure/login role=$role \
+                          jwt="$(curl -s "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F" -H Metadata:true | jq -r '.access_token')" \
+                          subscription_id=$(curl -s -H Metadata:true "http://169.254.169.254/metadata/instance?api-version=2017-08-01" | jq -r '.compute | .subscriptionId') \
+                          resource_group_name=$(curl -s -H Metadata:true "http://169.254.169.254/metadata/instance?api-version=2017-08-01" | jq -r '.compute | .resourceGroupName') \
+                          vmss_name=$(curl -s -H Metadata:true "http://169.254.169.254/metadata/instance?api-version=2017-08-01" | jq -r '.compute | .name' | awk -F_ '{print$1}'))
+
+                          export VAULT_TOKEN
+                          git clone git@github.com:nationwide-building-society/<+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>.git --branch <+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.branch> --single-branch
+
+                          REPO_NAME=<+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>
+                          MODULE_PATH=<+pipeline.variables.module_path>                       
+                          terraform -chdir=$REPO_NAME/$MODULE_PATH apply -input=false -lock-timeout=180m /tmp/tfplan
+                    environmentVariables:
+                      - name: ARM_SUBSCRIPTION_ID
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmsubscription_id.output.outputVariables.secret>
+                        type: String
+                      - name: ARM_TENANT_ID
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmtenant_id.output.outputVariables.secret>
+                        type: String
+                      - name: ARM_CLIENT_ID
+                        type: String
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmclientid.output.outputVariables.secret>
+                      - name: ARM_CLIENT_SECRET
+                        type: String
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmclientsecret.output.outputVariables.secret>
+                      - name: CONFLUENT_CLOUD_API_KEY
+                        type: String
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.confluentapikey.output.outputVariables.secret>
+                      - name: CONFLUENT_CLOUD_API_SECRET
+                        type: String
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.confluentapisecret.output.outputVariables.secret>
+                      - name: role
+                        type: String
+                        value: <+pipeline.variables.role>
+                      - name: namespace
+                        type: String
+                        value: <+pipeline.variables.namespace>
+                    outputVariables: []
+                    executionTarget: {}
+                  when:
+                    stageStatus: Success
+                    condition: <+pipeline.stages.Options.spec.execution.steps.Annotate.spec.environmentVariables.tf_action.toLowerCase()> == "apply"
+                  timeout: 2h
+          tags: {}
+        when:
+          pipelineStatus: Success
+          condition: <+pipeline.stages.Options.spec.execution.steps.Annotate.spec.environmentVariables.tf_action.toLowerCase()> != "destroy"
+    - stage:
+        name: Terraform Plan and Destroy
+        identifier: Terraform_Plan_and_Destroy
+        description: ""
+        type: Custom
+        spec:
+          execution:
+            steps:
+              - step:
+                  type: ShellScript
+                  name: Terraform Plan
+                  identifier: Terraform_Plan_Bespoke
+                  spec:
+                    shell: Bash
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          export VAULT_ADDR=https://kmaas.ss-security-ccoe-np.azure.nbscloud.co.uk
+                          export VAULT_NAMESPACE=$namespace
+                          echo "Vault Namespace is $namespace and Role is $role"
+                          VAULT_TOKEN=$(vault write -field=token auth/azure/login role=$role \
+                          jwt="$(curl -s "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F" -H Metadata:true | jq -r '.access_token')" \
+                          subscription_id=$(curl -s -H Metadata:true "http://169.254.169.254/metadata/instance?api-version=2017-08-01" | jq -r '.compute | .subscriptionId') \
+                          resource_group_name=$(curl -s -H Metadata:true "http://169.254.169.254/metadata/instance?api-version=2017-08-01" | jq -r '.compute | .resourceGroupName') \
+                          vmss_name=$(curl -s -H Metadata:true "http://169.254.169.254/metadata/instance?api-version=2017-08-01" | jq -r '.compute | .name' | awk -F_ '{print$1}'))
+
+                          export VAULT_TOKEN
+                          git clone git@github.com:nationwide-building-society/<+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>.git --branch <+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.branch> --single-branch
+
+                          REPO_NAME=<+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>
+                          MODULE_PATH=<+pipeline.variables.module_path>
+                          TF_VARS_PATH=<+pipeline.variables.tf_vars_path>
+                          FULL_DIR_PATH=$(pwd)/<+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>
+
+                          terraform -chdir=$REPO_NAME/$MODULE_PATH init -upgrade -backend=true -backend-config="key=confluent.tfstate" -backend-config="storage_account_name=stdevuks01341746aeddtf" -backend-config="container_name=tfstate" -backend-config="subscription_id=d16db430-7f22-44c5-aaed-01341746aedd" -backend-config="resource_group_name=rg-dev-uks-46aedd-statefile" -reconfigure
+
+                          terraform -chdir=$REPO_NAME/$MODULE_PATH plan -destroy -input=false -lock-timeout=180m -var-file=$FULL_DIR_PATH/<+pipeline.variables.tf_vars_path>/terraform.tfvars -out /tmp/tfdestroy
+                    environmentVariables:
+                      - name: ARM_SUBSCRIPTION_ID
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmsubscription_id.output.outputVariables.secret>
+                        type: String
+                      - name: ARM_TENANT_ID
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmtenant_id.output.outputVariables.secret>
+                        type: String
+                      - name: ARM_CLIENT_ID
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmclientid.output.outputVariables.secret>
+                        type: String
+                      - name: ARM_CLIENT_SECRET
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmclientsecret.output.outputVariables.secret>
+                        type: String
+                      - name: CONFLUENT_CLOUD_API_KEY
+                        type: String
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.confluentapikey.output.outputVariables.secret>
+                      - name: CONFLUENT_CLOUD_API_SECRET
+                        type: String
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.confluentapisecret.output.outputVariables.secret>
+                      - name: role
+                        type: String
+                        value: <+pipeline.variables.role>
+                      - name: namespace
+                        type: String
+                        value: <+pipeline.variables.namespace>
+                    outputVariables: []
+                    timeout: 10m
+                    executionTarget: {}
+                  when:
+                    stageStatus: Success
+                  timeout: 1h
+              - step:
+                  type: HarnessApproval
+                  name: Approval
+                  identifier: Approval
+                  spec:
+                    approvalMessage: Please review the following information and approve the pipeline progression
+                    includePipelineExecutionHistory: true
+                    approvers:
+                      userGroups: <+input>
+                      minimumCount: 1
+                      disallowPipelineExecutor: false
+                    approverInputs: []
+                    isAutoRejectEnabled: false
+                  timeout: 1d
+                  failureStrategies:
+                    - onFailure:
+                        errors:
+                          - ApprovalRejection
+                        action:
+                          type: MarkAsFailure
+                  when:
+                    stageStatus: Success
+              - step:
+                  type: ShellScript
+                  name: Terraform Destroy
+                  identifier: Terraform_Destroy_Bespoke
+                  spec:
+                    shell: Bash
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          export VAULT_ADDR=https://kmaas.ss-security-ccoe-np.azure.nbscloud.co.uk
+                          export VAULT_NAMESPACE=$namespace
+                          echo "Vault Namespace is $namespace and Role is $role"
+                          VAULT_TOKEN=$(vault write -field=token auth/azure/login role=$role \
+                          jwt="$(curl -s "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F" -H Metadata:true | jq -r '.access_token')" \
+                          subscription_id=$(curl -s -H Metadata:true "http://169.254.169.254/metadata/instance?api-version=2017-08-01" | jq -r '.compute | .subscriptionId') \
+                          resource_group_name=$(curl -s -H Metadata:true "http://169.254.169.254/metadata/instance?api-version=2017-08-01" | jq -r '.compute | .resourceGroupName') \
+                          vmss_name=$(curl -s -H Metadata:true "http://169.254.169.254/metadata/instance?api-version=2017-08-01" | jq -r '.compute | .name' | awk -F_ '{print$1}'))
+
+                          export VAULT_TOKEN
+                          git clone git@github.com:nationwide-building-society/<+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>.git --branch <+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.branch> --single-branch
+
+                          REPO_NAME=<+pipeline.stages.Options.spec.execution.steps.Annotate.output.outputVariables.repo_name>
+                          MODULE_PATH=<+pipeline.variables.module_path>                       
+                          terraform -chdir=$REPO_NAME/$MODULE_PATH apply -input=false -lock-timeout=180m -parallelism=1 "/tmp/tfdestroy"
+                    environmentVariables:
+                      - name: ARM_SUBSCRIPTION_ID
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmsubscription_id.output.outputVariables.secret>
+                        type: String
+                      - name: ARM_TENANT_ID
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmtenant_id.output.outputVariables.secret>
+                        type: String
+                      - name: ARM_CLIENT_ID
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmclientid.output.outputVariables.secret>
+                        type: String
+                      - name: ARM_CLIENT_SECRET
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.getarmclientsecret.output.outputVariables.secret>
+                        type: String
+                      - name: CONFLUENT_CLOUD_API_KEY
+                        type: String
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.confluentapikey.output.outputVariables.secret>
+                      - name: CONFLUENT_CLOUD_API_SECRET
+                        type: String
+                        value: <+pipeline.stages.PrereqSecrets.spec.execution.steps.confluentapisecret.output.outputVariables.secret>
+                      - name: role
+                        type: String
+                        value: <+pipeline.variables.role>
+                      - name: namespace
+                        type: String
+                        value: <+pipeline.variables.namespace>
+                    outputVariables: []
+                    executionTarget: {}
+                  when:
+                    stageStatus: Success
+                  timeout: 1h
+          tags: {}
+        when:
+          pipelineStatus: Success
+          condition: <+pipeline.stages.Options.spec.execution.steps.Annotate.spec.environmentVariables.tf_action.toLowerCase()> == "destroy"
+  delegateSelectors:
+    - vm-<+pipeline.variables.subscription_name>
+  variables:
+    - name: subscription_id
+      type: String
+      description: Azure subscription ID
+      value: <+input>
+    - name: subscription_name
+      type: String
+      description: Azure subscription name
+      value: <+input>
+    - name: module_path
+      type: String
+      description: Terraform module path
+      value: <+input>
+    - name: tf_vars_path
+      type: String
+      description: Terraform env variables path
+      value: <+input>
+    - name: tf_command_line_flag
+      type: String
+      description: Terraform command line flags
+      required: false
+      value: <+input>
+    - name: namespace
+      type: String
+      value: <+input>
+    - name: role
+      type: String
+      value: <+input>
